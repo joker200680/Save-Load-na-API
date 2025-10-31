@@ -1,0 +1,183 @@
+using UnityEngine;
+using UnityEngine.UI;
+using System.Collections;
+using System.Threading.Tasks;
+
+public class GameManager : MonoBehaviour
+{
+    public static GameManager Instance;
+
+    [Header("UI References")]
+    public GameObject pauseMenu;
+    public Text vidaText;
+    public Text itensText;
+    public Text posicaoText;
+    public Text saveMessageText;
+
+    private Jogador currentPlayer;
+    private GameApiService apiService;
+    private string playerId = "1";
+
+    void Awake()
+    {
+        if (Instance == null)
+        {
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
+        }
+    }
+
+    async void Start()
+    {
+        apiService = new GameApiService();
+
+        if (saveMessageText != null) saveMessageText.gameObject.SetActive(false);
+        if (pauseMenu != null) pauseMenu.SetActive(false);
+
+        await LoadPlayerData();
+    }
+
+    void Update()
+    {
+        if (Input.GetKeyDown(KeyCode.Escape))
+        {
+            TogglePauseMenu();
+        }
+    }
+
+    public void UpdatePlayerData(int vida, int quantidadeItens, Vector3 position)
+    {
+        if (currentPlayer != null)
+        {
+            currentPlayer.Vida = vida.ToString();
+            currentPlayer.PosicaoX = (int)position.x;
+            currentPlayer.PosicaoY = (int)position.y;
+            currentPlayer.PosicaoZ = (int)position.z;
+        }
+    }
+
+    public async void SavePlayerData()
+    {
+        if (currentPlayer != null)
+        {
+            await apiService.AtualizarJogador(currentPlayer.id, currentPlayer);
+            Debug.Log("Salvamento automático realizado!");
+        }
+    }
+
+    public void ShowSaveMessage()
+    {
+        StartCoroutine(ShowSaveMessageCoroutine());
+    }
+
+    private IEnumerator ShowSaveMessageCoroutine()
+    {
+        if (saveMessageText != null)
+        {
+            saveMessageText.gameObject.SetActive(true);
+            yield return new WaitForSeconds(2f);
+            saveMessageText.gameObject.SetActive(false);
+        }
+    }
+
+    private async Task LoadPlayerData()
+    {
+        try
+        {
+            currentPlayer = await apiService.GetJogador(playerId);
+
+            if (currentPlayer == null)
+            {
+                Debug.Log("Jogador não encontrado, criando novo...");
+                currentPlayer = new Jogador
+                {
+                    Nome = "PlayerPrincipal",
+                    Login = "player1",
+                    Senha = "123",
+                    Fase = "1",
+                    Vida = "100",
+                    PosicaoX = 0,
+                    PosicaoY = 0,
+                    PosicaoZ = 0
+                };
+
+                currentPlayer = await apiService.CriarJogador(currentPlayer);
+                playerId = currentPlayer.id;
+                Debug.Log($"Novo jogador criado com ID: {currentPlayer.id}");
+            }
+
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogError($"Erro ao carregar dados: {ex.Message}");
+        }
+    }
+
+    
+
+    public void TogglePauseMenu()
+    {
+        if (pauseMenu == null) return;
+
+        bool isPaused = !pauseMenu.activeSelf;
+        pauseMenu.SetActive(isPaused);
+        Time.timeScale = isPaused ? 0f : 1f;
+
+        if (isPaused)
+        {
+            UpdatePauseMenuUI();
+        }
+    }
+
+    private void UpdatePauseMenuUI()
+    {
+        if (currentPlayer != null)
+        {
+            if (vidaText != null) vidaText.text = "Vida: " + currentPlayer.Vida;
+            if (posicaoText != null) posicaoText.text = $"Posição: ({currentPlayer.PosicaoX}, {currentPlayer.PosicaoY}, {currentPlayer.PosicaoZ})";
+
+            StartCoroutine(LoadAndDisplayItens());
+        }
+    }
+
+    private async Task<int> GetQuantidadeItens()
+    {
+        if (currentPlayer != null)
+        {
+            ItemJogador[] itens = await apiService.GetItensJogador(currentPlayer.id);
+            return itens.Length;
+        }
+        return 0;
+    }
+
+    private IEnumerator LoadAndDisplayItens()
+    {
+        var task = GetQuantidadeItens();
+
+        while (!task.IsCompleted)
+            yield return null;
+
+        if (itensText != null)
+            itensText.text = "Quantidade de Itens: " + task.Result;
+    }
+
+    public void RecarregarJogo()
+    {
+        StartCoroutine(ReloadGameCoroutine());
+    }
+
+    private IEnumerator ReloadGameCoroutine()
+    {
+        var task = LoadPlayerData();
+
+        while (!task.IsCompleted)
+            yield return null;
+
+        TogglePauseMenu();
+    }
+
+    void OnDestroy()
+    {
+        apiService?.Dispose();
+    }
+}
